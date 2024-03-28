@@ -2,7 +2,25 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <ctime>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 using namespace std;
+
+void HandleClient(SOCKET clientSocket) {
+    char message[200];
+    int byteCount;
+    while (true) {
+        byteCount = recv(clientSocket, message, sizeof(message), 0);
+        if (byteCount > 0) {
+            message[byteCount] = '\0';
+            cout << message << endl;
+
+
+        }
+
+    }
+}
 
 int main() {
     // Initialize WSA variables
@@ -34,7 +52,7 @@ int main() {
     sockaddr_in service;
     service.sin_family = AF_INET;
     // Change to server machine ip address
-    service.sin_addr.s_addr = inet_addr("192.168.1.2");
+    service.sin_addr.s_addr = inet_addr("192.168.254.186");
     service.sin_port = htons(55555);
     if (bind(serverSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
         cout << "bind() failed: " << WSAGetLastError() << endl;
@@ -54,10 +72,15 @@ int main() {
         cout << "listen() is OK!, I'm waiting for new connections..." << endl;
     }
 
+
     // Accept incoming connections from hydrogen and oxygen clients
     SOCKET hydrogenClientSocket = accept(serverSocket, NULL, NULL);
     SOCKET oxygenClientSocket = accept(serverSocket, NULL, NULL);
 
+
+    // change here para atleast isa gagana padin
+
+ //   if (hydrogenClientSocket == INVALID_SOCKET) {
     if (hydrogenClientSocket == INVALID_SOCKET || oxygenClientSocket == INVALID_SOCKET) {
         cout << "accept failed: " << WSAGetLastError() << endl;
         closesocket(serverSocket);
@@ -66,33 +89,47 @@ int main() {
     }
     else {
         cout << "accept() is OK!" << endl;
+
+
     }
 
-    // sanity check if connecting correctly
-    // while (true) {
-    //     char buffer[200];
-    //     int byteCount;
+    //create monitor
 
-    //     // Receive data from hydrogen client
-    //     byteCount = recv(hydrogenClientSocket, buffer, sizeof(buffer), 0);
-    //     if (byteCount > 0) {
-    //         buffer[byteCount] = '\0'; // Null-terminate the received data
-    //         cout << "Received from hydrogen client: " << buffer << endl;
-    //     }
+    //create thread that handles the connections
 
-    //     // Receive data from oxygen client
-    //     byteCount = recv(oxygenClientSocket, buffer, sizeof(buffer), 0);
-    //     if (byteCount > 0) {
-    //         buffer[byteCount] = '\0'; // Null-terminate the received data
-    //         cout << "Received from oxygen client: " << buffer << endl;
-    //     }
-    // }
+        // Create threads to handle client connections
+    thread hydrogenThread(HandleClient, hydrogenClientSocket);
+    thread oxygenThread(HandleClient, oxygenClientSocket);
 
-    // Handle communication with clients here...
-    // Receive and send data accordingly (receive requests and send confirmation here)
+    // Join threads to the main thread
+    hydrogenThread.join();
+    oxygenThread.join();
+
+        // sanity check if connecting correctly
+        // while (true) {
+        //     char buffer[200];
+        //     int byteCount;
+
+        //     // Receive data from hydrogen client
+        //     byteCount = recv(hydrogenClientSocket, buffer, sizeof(buffer), 0);
+        //     if (byteCount > 0) {
+        //         buffer[byteCount] = '\0'; // Null-terminate the received data
+        //         cout << "Received from hydrogen client: " << buffer << endl;
+        //     }
+
+        //     // Receive data from oxygen client
+        //     byteCount = recv(oxygenClientSocket, buffer, sizeof(buffer), 0);
+        //     if (byteCount > 0) {
+        //         buffer[byteCount] = '\0'; // Null-terminate the received data
+        //         cout << "Received from oxygen client: " << buffer << endl;
+        //     }
+        // }
+
+        // Handle communication with clients here...
+        // Receive and send data accordingly (receive requests and send confirmation here)
 
 
-    // Cleanup and close sockets
+        // Cleanup and close sockets
     closesocket(hydrogenClientSocket);
     closesocket(oxygenClientSocket);
     closesocket(serverSocket);

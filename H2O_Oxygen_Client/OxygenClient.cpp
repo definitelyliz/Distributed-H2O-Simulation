@@ -1,7 +1,51 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <string>
+#include <sstream>
+#include <chrono>
+#include <ctime>
+#include <thread>
 using namespace std;
+
+
+
+// Function definition for sendData
+void sendData(SOCKET clientSocket, const std::string& message) {
+    // Sending data
+    int sbyteCount = send(clientSocket, message.c_str(), message.length(), 0);
+    if (sbyteCount == SOCKET_ERROR) {
+        cout << "Client send error: " << WSAGetLastError() << endl;
+    }
+    else {
+        std::cout << message << std::endl;
+        //    cout << "Client: sent " << sbyteCount << " bytes" << endl;
+    }
+}
+
+void oxygenSend(SOCKET clientSocket, int oxygenInput) {
+
+    for (int i = 1; i <= oxygenInput; ++i) {
+
+        time_t now = time(0);
+        struct tm* timeinfo;
+        timeinfo = localtime(&now);
+
+        char timestamp[20];
+        strftime(timestamp, 20, "%Y-%m-%d %H:%M:%S", timeinfo);
+
+        std::string message = "O" + std::to_string(i) + ", request, " + timestamp;
+
+
+        // Send the message to the server
+        sendData(clientSocket, message);
+
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+}
+
 
 int main() {
     // Initialize WSA
@@ -35,18 +79,30 @@ int main() {
     sockaddr_in clientService;
     clientService.sin_family = AF_INET;
     // Update with server's IP address
-    clientService.sin_addr.s_addr = inet_addr("192.168.1.2");
+    clientService.sin_addr.s_addr = inet_addr("192.168.254.186");
     clientService.sin_port = htons(55555);
     if (connect(clientSocket, (SOCKADDR*)&clientService, sizeof(clientService)) == SOCKET_ERROR) {
         cout << "Client: connect() - Failed to connect: " << WSAGetLastError() << endl;
-        closesocket(clientSocket);
+        closesocket(clientSocket); 
         WSACleanup();
         return 0;
     }
     else {
         cout << "Client: Connect() is OK!" << endl;
         cout << "Client: Can start sending and receiving data..." << endl;
+
+        int oxygenInput;
+        std::cout << "Input number of Oxygen bond requests: ";
+        std::cin >> oxygenInput;
+
+        oxygenSend(clientSocket, oxygenInput);
+
+
+
     }
+
+    
+
 
     // sanity check if connecting correctly
     // while (true) {
@@ -72,3 +128,4 @@ int main() {
     WSACleanup();
     return 0;
 }
+
