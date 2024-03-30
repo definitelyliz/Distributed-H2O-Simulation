@@ -2,7 +2,45 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <ctime>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <thread>
+#include <mutex>
+
 using namespace std;
+
+mutex logMutex;
+
+void clientHandler(SOCKET clientSocket, ofstream& logFile) {
+    char buffer[200];
+    int byteCount;
+
+    while (true) {
+        // Receive data from client
+        byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
+        if (byteCount > 0) {
+            buffer[byteCount] = '\0'; // Null-terminate the received data
+            cout << buffer << endl;
+            // Record request in log file with timestamp
+            {
+                lock_guard<mutex> lock(logMutex);
+                time_t now = time(0);
+                tm ltm;
+                localtime_s(&ltm, &now);
+                char timestamp[20];
+                strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
+                logFile << "Received request: " << buffer << " at " << timestamp << endl;
+            }
+
+            // Send acknowledgement back to client
+            string ack = "ack: ";
+            ack += buffer; // Acknowledge the received request
+            send(clientSocket, ack.c_str(), ack.length(), 0);
+            cout << "Ack sent" << endl;
+        }
+    }
+}
 
 int main() {
     // Initialize WSA variables
@@ -27,14 +65,13 @@ int main() {
         return 0;
     }
     else {
-        cout << "Socket is OK!" << endl;
+        cout << "Socket online" << endl;
     }
 
     // Bind the socket
     sockaddr_in service;
     service.sin_family = AF_INET;
-    // Change to server machine ip address
-    service.sin_addr.s_addr = inet_addr("192.168.1.2");
+    service.sin_addr.s_addr = INADDR_ANY; // Bind to all available interfaces
     service.sin_port = htons(55555);
     if (bind(serverSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
         cout << "bind() failed: " << WSAGetLastError() << endl;
@@ -43,59 +80,53 @@ int main() {
         return 0;
     }
     else {
-        cout << "bind() is OK!" << endl;
+        cout << "bind() on" << endl;
     }
 
     // Listen to incoming connections
-    if (listen(serverSocket, 2) == SOCKET_ERROR) { // Increase backlog to 2 for both clients
+    if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
         cout << "listen(): Error listening on socket: " << WSAGetLastError() << endl;
     }
     else {
-        cout << "listen() is OK!, I'm waiting for new connections..." << endl;
+        cout << "listen() is online, waiting for new connections..." << endl;
     }
 
-    // Accept incoming connections from hydrogen and oxygen clients
-    SOCKET hydrogenClientSocket = accept(serverSocket, NULL, NULL);
-    SOCKET oxygenClientSocket = accept(serverSocket, NULL, NULL);
-
-    if (hydrogenClientSocket == INVALID_SOCKET || oxygenClientSocket == INVALID_SOCKET) {
-        cout << "accept failed: " << WSAGetLastError() << endl;
+    // Open log file for recording requests
+    ofstream logFile("server_log.txt", ios::app);
+    if (!logFile.is_open()) {
+        cerr << "Failed to open log file." << endl;
         closesocket(serverSocket);
         WSACleanup();
-        return -1;
-    }
-    else {
-        cout << "accept() is OK!" << endl;
+        return 0;
     }
 
-    // sanity check if connecting correctly
-    // while (true) {
-    //     char buffer[200];
-    //     int byteCount;
+    vector<thread> threads;
 
-    //     // Receive data from hydrogen client
-    //     byteCount = recv(hydrogenClientSocket, buffer, sizeof(buffer), 0);
-    //     if (byteCount > 0) {
-    //         buffer[byteCount] = '\0'; // Null-terminate the received data
-    //         cout << "Received from hydrogen client: " << buffer << endl;
-    //     }
+    // Accept incoming connections and handle clients concurrently
+    while (true) {
+        SOCKET clientSocket = accept(serverSocket, NULL, NULL);
+        if (clientSocket == INVALID_SOCKET) {
+            cout << "accept failed: " << WSAGetLastError() << endl;
+            closesocket(serverSocket);
+            WSACleanup();
+            return -1;
+        }
+        else {
+            cout << "accept() is OK!" << endl;
+        }
 
-    //     // Receive data from oxygen client
-    //     byteCount = recv(oxygenClientSocket, buffer, sizeof(buffer), 0);
-    //     if (byteCount > 0) {
-    //         buffer[byteCount] = '\0'; // Null-terminate the received data
-    //         cout << "Received from oxygen client: " << buffer << endl;
-    //     }
-    // }
+        // Start a new thread to handle the client
+        threads.emplace_back(clientHandler, clientSocket, ref(logFile));
+    }
 
-    // Handle communication with clients here...
-    // Receive and send data accordingly (receive requests and send confirmation here)
-
+    // Join all threads
+    for (auto& th : threads) {
+        th.join();
+    }
 
     // Cleanup and close sockets
-    closesocket(hydrogenClientSocket);
-    closesocket(oxygenClientSocket);
     closesocket(serverSocket);
     WSACleanup();
+    logFile.close();
     return 0;
 }
