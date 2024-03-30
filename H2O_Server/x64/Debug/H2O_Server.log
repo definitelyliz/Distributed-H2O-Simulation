@@ -1,3 +1,3 @@
 ﻿  Server.cpp
-C:\Users\edayo\Downloads\4y2t\STDISCM\Distributed-H2O-Simulation\H2O_Server\Server.cpp(39,55): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\edayo\Downloads\4y2t\STDISCM\Distributed-H2O-Simulation\H2O_Server\Server.cpp(59,55): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
   H2O_Server.vcxproj -> C:\Users\edayo\Downloads\4y2t\STDISCM\Distributed-H2O-Simulation\H2O_Server\x64\Debug\H2O_Server.exe

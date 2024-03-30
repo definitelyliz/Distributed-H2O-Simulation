@@ -20,7 +20,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="server_log.txt">
+    <Text Include="H_client_log_req.txt">
       <Filter>Source Files</Filter>
     </Text>
   </ItemGroup>

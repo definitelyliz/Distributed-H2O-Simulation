@@ -7,12 +7,13 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <sstream> // for std::stringstream
 
 using namespace std;
 
 mutex logMutex;
 
-void clientHandler(SOCKET clientSocket, ofstream& logFile) {
+void clientHandler(SOCKET clientSocket, ofstream& logFileHReqH) {
     char buffer[200];
     int byteCount;
 
@@ -21,8 +22,22 @@ void clientHandler(SOCKET clientSocket, ofstream& logFile) {
         byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (byteCount > 0) {
             buffer[byteCount] = '\0'; // Null-terminate the received data
-            cout << buffer << endl;
-            // Record request in log file with timestamp
+            //cout << buffer << endl;
+            // Extract IDs from the received message
+            string message(buffer);
+            stringstream ss(message);
+            string token;
+            vector<int> ids;
+
+            // Extract all IDs from the message
+            while (getline(ss, token, ' ')) {
+                if (token.find("H") != string::npos) {
+                    int id = stoi(token.substr(1)); // Extract the ID after "H"
+                    ids.push_back(id);
+                }
+            }
+
+            // Record request IDs in log file with timestamp
             {
                 lock_guard<mutex> lock(logMutex);
                 time_t now = time(0);
@@ -30,19 +45,25 @@ void clientHandler(SOCKET clientSocket, ofstream& logFile) {
                 localtime_s(&ltm, &now);
                 char timestamp[20];
                 strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
-                logFile << "Received request: " << buffer << " at " << timestamp << endl;
+                for (int id : ids) {
+                    logFileHReqH << "H" << id << ", received, " << timestamp << endl;
+                }
             }
 
-            // Send acknowledgement back to client
-            string ack = "ack: ";
-            ack += buffer; // Acknowledge the received request
+            // Send acknowledgment back to client with received IDs
+            string ack = "ack:";
+            for (int id : ids) {
+                ack += " H" + to_string(id); // Append each ID to the acknowledgment
+            }
+            //cout << "[" << ack << "]" << endl;
             send(clientSocket, ack.c_str(), ack.length(), 0);
-            cout << "Ack sent" << endl;
         }
     }
 }
 
 int main() {
+    cout << "Water Server" << endl;
+    cout << "=========================" << endl;
     // Initialize WSA variables
     WSADATA wsaData;
     int wsaerr;
@@ -92,8 +113,8 @@ int main() {
     }
 
     // Open log file for recording requests
-    ofstream logFile("server_log.txt", ios::app);
-    if (!logFile.is_open()) {
+    ofstream logFileHReqH("H_client_log_req.txt", ios::trunc);
+    if (!logFileHReqH.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(serverSocket);
         WSACleanup();
@@ -112,11 +133,11 @@ int main() {
             return -1;
         }
         else {
-            cout << "accept() is OK!" << endl;
+            cout << "accept() is on" << endl;
         }
 
         // Start a new thread to handle the client
-        threads.emplace_back(clientHandler, clientSocket, ref(logFile));
+        threads.emplace_back(clientHandler, clientSocket, ref(logFileHReqH));
     }
 
     // Join all threads
@@ -127,6 +148,6 @@ int main() {
     // Cleanup and close sockets
     closesocket(serverSocket);
     WSACleanup();
-    logFile.close();
+    logFileHReqH.close();
     return 0;
 }
