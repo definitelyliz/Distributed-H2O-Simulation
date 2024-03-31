@@ -104,7 +104,7 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
 
         // Set up the timeout
         timeval timeout;
-        timeout.tv_sec = 5;  // 5 seconds
+        timeout.tv_sec = 2;  // 2 seconds
         timeout.tv_usec = 0;
 
         // Wait for incoming messages with a timeout of 5 seconds
@@ -114,8 +114,8 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
             continue;
         }
         else if (result == 0) {
-            cout << "No incoming message within 5 seconds. Continuing to listen." << endl;
-            continue;
+            cout << "No incoming message within 5 seconds. Stopped listening." << endl;
+            break;
         }
 
         // Incoming message received, proceed to receive it
@@ -213,7 +213,7 @@ int main() {
     }
 
     // Open log file for recording requests and acknowledgements, truncating existing content
-    ofstream logFileReq("H_client_log_req.txt", ios::app);
+    ofstream logFileReq("H_client_log_req.txt", ios::trunc);
     if (!logFileReq.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(clientSocket);
@@ -222,7 +222,7 @@ int main() {
     }
 
     // Open log file for recording acknowledgements, truncating existing content
-    ofstream logFileAck("H_client_log_ack.txt", ios::app);
+    ofstream logFileAck("H_client_log_ack.txt", ios::trunc);
     if (!logFileAck.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(clientSocket);
@@ -231,7 +231,7 @@ int main() {
     }
 
     // Open log file for recording bond messages, truncating existing content
-    ofstream logFileBond("H_client_log_bond.txt", ios::app);
+    ofstream logFileBond("H_client_log_bond.txt", ios::trunc);
     if (!logFileBond.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(clientSocket);
@@ -245,7 +245,7 @@ int main() {
     mutex logFileBondMutex;
 
     // Simulate sending requests asynchronously
-    thread requestThread1(sendRequest, clientSocket, 1, 500, ref(logFileReq), ref(logFileReqMutex));
+    thread requestThread1(sendRequest, clientSocket, 1, 100, ref(logFileReq), ref(logFileReqMutex));
 
     // Simulate listening for acknowledgements asynchronously
     thread listenThread1(listenMessages, clientSocket, ref(logFileAck), ref(logFileBond), ref(logFileAckMutex));

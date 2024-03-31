@@ -130,6 +130,11 @@
   <ItemGroup>
     <ClCompile Include="OxygenClient.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="O_client_log_ack.txt" />
+    <Text Include="O_client_log_bond.txt" />
+    <Text Include="O_client_log_req.txt" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

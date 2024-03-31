@@ -3,98 +3,182 @@
 #include <ws2tcpip.h>
 #include <ctime>
 #include <fstream>
+#include <string> // for std::string
+#include <sstream> // for std::stringstream
 #include <thread>
 #include <mutex>
+#include <condition_variable>
+
 
 using namespace std;
 
+std::mutex sendMutex;
+std::condition_variable ackReceived;
+bool isAckReceived = true;
 mutex logMutex;
-
-void sendRequest(SOCKET clientSocket, int id, ofstream& logFile) {
-    char request[10];
-    sprintf_s(request, sizeof(request), "O%d", id);
-
-    // Send request to server
-    send(clientSocket, request, strlen(request), 0);
-
-    // Record request in log file with timestamp
-    {
-        lock_guard<mutex> lock(logMutex);
-        time_t now = time(0);
-        tm ltm;
-        localtime_s(&ltm, &now);
-        char timestamp[20];
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
-        logFile << request << ", request, " << timestamp << endl;
+void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile, mutex& logMutex) {
+    const int maxChunkSize = 190; // Maximum size of each chunk
+    int idLength = 0;
+    if (endId <= 9) {
+        idLength = 2; // IDs with 1 digit (0-9)
     }
-}
+    else if (endId <= 99) {
+        idLength = 3; // IDs with 2 digits (10-99)
+    }
+    else if (endId <= 999) {
+        idLength = 4; // IDs with 3 digits (100-999)
+    }
+    else if (endId <= 9999) {
+        idLength = 5; // IDs with 4 digits (1000-9999)
+    }
+    else if (endId <= 99999) {
+        idLength = 6; // IDs with 5 digits (10000-99999)
+    }
+    else {
+        idLength = 7; // IDs with 6 digits (100000-999999)
+    }
 
-void listenAck(SOCKET clientSocket, int id, ofstream& logFile) {
-    char buffer[200];
-    int byteCount;
+    int startIdStored = startId; // Initialize startIdStored
+    int endIdStored = startId - 1; // Initialize endIdStored
 
-    // Listen for acknowledgements from server
-    while (true) {
-        byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
-        if (byteCount > 0) {
-            buffer[byteCount] = '\0';
+    // Iterate over IDs and send in chunks
+    for (int id = startId; id <= endId; ) {
+        {
+            unique_lock<mutex> lock(logMutex); // Use logMutex for synchronization
+            ackReceived.wait(lock, [] { return isAckReceived; });
+            isAckReceived = false; // Reset the flag after acknowledgment is received
+        }
+        string request;
+        int remainingChars = maxChunkSize; // Remaining characters allowed in the current chunk
 
-            if (strstr(buffer, "ack")) {
-
-                // Record acknowledgement in log file with timestamp
-                {
-                    lock_guard<mutex> lock(logMutex);
-                    time_t now = time(0);
-                    tm ltm;
-                    localtime_s(&ltm, &now);
-                    char timestamp[20];
-                    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
-                    logFile << id << ", acknowledged, " << timestamp << endl;
-                }
-
-                break; // Break from loop after receiving acknowledgement
+        // Build the request string with IDs until the chunk size limit is reached
+        while (id <= endId && remainingChars > idLength) {
+            string idStr = "O" + to_string(id) + " ";
+            if (idStr.length() <= remainingChars) {
+                request += idStr;
+                remainingChars -= idStr.length();
+                ++id;
             }
+            else {
+                break; // Stop if adding the ID would exceed the chunk size limit
+            }
+        }
+
+        // Remove the trailing space from the request
+        if (!request.empty()) {
+            request.pop_back();
+        }
+        //cout << "Sent: " << "[" << request << "]" << endl;
+        // Send request to server
+        send(clientSocket, request.c_str(), request.length(), 0);
+
+        // Record request in log file with timestamp
+        {
+            lock_guard<mutex> lock(logMutex);
+            time_t now = time(0);
+            tm ltm;
+            localtime_s(&ltm, &now);
+            char timestamp[20];
+            strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
+            for (int i = startIdStored; i < id; ++i) { // Iterate from startIdStored to id
+                string idStr = "O" + to_string(i);
+                logFile << idStr << ", request, " << timestamp << endl;
+            }
+            startIdStored = id; // Update startIdStored
+            endIdStored = id - 1; // Update endIdStored
         }
     }
 }
 
-void listenBond(SOCKET clientSocket, int id, ofstream& logFile) {
-    char buffer[200];
-    int byteCount;
 
-    // Listen for bonded from server
+
+void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFileBond, mutex& logMutex) {
     while (true) {
+        char buffer[200];
+        int byteCount;
+
+        // Set up the file descriptor set for the socket
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(clientSocket, &readSet);
+
+        // Set up the timeout
+        timeval timeout;
+        timeout.tv_sec = 2;  // 2 seconds
+        timeout.tv_usec = 0;
+
+        // Wait for incoming messages with a timeout of 5 seconds
+        int result = select(0, &readSet, nullptr, nullptr, &timeout);
+        if (result == SOCKET_ERROR) {
+            cerr << "Error in select: " << WSAGetLastError() << endl;
+            continue;
+        }
+        else if (result == 0) {
+            cout << "No incoming message within 5 seconds. Stopped listening." << endl;
+            break;
+        }
+
+        // Incoming message received, proceed to receive it
         byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (byteCount > 0) {
             buffer[byteCount] = '\0';
-            cout << buffer << endl;
-            // Record acknowledgement in log file with timestamp
-            if (strstr(buffer, "bond")) {
 
-                {
-                    lock_guard<mutex> lock(logMutex);
-                    time_t now = time(0);
-                    tm ltm;
-                    localtime_s(&ltm, &now);
-                    char timestamp[20];
-                    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
-                    logFile << id << ", ack, " << timestamp << endl;
-                }
+            // Check if "ack" or "bond" is found in the message
+            string message(buffer);
+            size_t foundAck = message.find("ack");
+            size_t foundBond = message.find("bond");
 
-                break; // Break from loop after receiving acknowledgement
+            // Extract the IDs from the received message
+            string extractedIDs;
+            size_t foundColon = message.find(":");
+            if (foundColon != string::npos) {
+                extractedIDs = message.substr(foundColon + 2); // Skip ": "
             }
+
+            //cout << "Received message: [" << extractedIDs << "]" << endl;
+
+            // Record message in the corresponding log file with timestamp
+            {
+                lock_guard<mutex> lock(logMutex);
+                time_t now = time(0);
+                tm ltm;
+                localtime_s(&ltm, &now);
+                char timestamp[20];
+                strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
+                if (foundAck != string::npos) {
+                    // "ack" found in the message, log each ID to logFileAck individually
+                    stringstream ss(extractedIDs);
+                    string id;
+                    while (getline(ss, id, ' ')) {
+                        logFileAck << id << ", ack, " << timestamp << endl;
+                    }
+                }
+                else if (foundBond != string::npos) {
+                    // "bond" found in the message, log to logFileBond
+                    logFileBond << extractedIDs << ", bonded, " << timestamp << endl;
+                }
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(sendMutex);
+            isAckReceived = true;
+            ackReceived.notify_all(); // Notify sendRequest to send the next batch
         }
     }
 }
+
+
 
 int main() {
+    cout << "Oxygen Client" << endl;
+    cout << "=========================" << endl;
     // Initialize WSA variables
     WSADATA wsaData;
     int wsaerr;
     WORD wVersionRequested = MAKEWORD(2, 2);
     wsaerr = WSAStartup(wVersionRequested, &wsaData);
     if (wsaerr != 0) {
-        cout << "The Winsock dll not found!" << endl;
+        cout << "The Winsock dll not found" << endl;
         return 0;
     }
     else {
@@ -110,7 +194,7 @@ int main() {
         return 0;
     }
     else {
-        cout << "Socket is OK!" << endl;
+        cout << "Socket is on" << endl;
     }
 
     // Connect to server
@@ -128,16 +212,17 @@ int main() {
         cout << "Connected to server." << endl;
     }
 
-    // Open log file for recording requests and acknowledgements
-    ofstream logFileReq("O_client_log_req.txt", ios::app);
+    // Open log file for recording requests and acknowledgements, truncating existing content
+    ofstream logFileReq("O_client_log_req.txt", ios::trunc);
     if (!logFileReq.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(clientSocket);
         WSACleanup();
         return 0;
     }
-    // Open log file for recording requests and acknowledgements
-    ofstream logFileAck("O_client_log_ack.txt", ios::app);
+
+    // Open log file for recording acknowledgements, truncating existing content
+    ofstream logFileAck("O_client_log_ack.txt", ios::trunc);
     if (!logFileAck.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(clientSocket);
@@ -145,7 +230,8 @@ int main() {
         return 0;
     }
 
-    ofstream logFileBond("O_client_log_bond.txt", ios::app);
+    // Open log file for recording bond messages, truncating existing content
+    ofstream logFileBond("O_client_log_bond.txt", ios::trunc);
     if (!logFileBond.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(clientSocket);
@@ -153,24 +239,28 @@ int main() {
         return 0;
     }
 
+    // Define mutexes for each log file
+    mutex logFileReqMutex;
+    mutex logFileAckMutex;
+    mutex logFileBondMutex;
+
     // Simulate sending requests asynchronously
-    thread requestThread1(sendRequest, clientSocket, 1, ref(logFileReq));
+    thread requestThread1(sendRequest, clientSocket, 1, 100, ref(logFileReq), ref(logFileReqMutex));
 
     // Simulate listening for acknowledgements asynchronously
-    thread ackThread1(listenAck, clientSocket, 1, ref(logFileAck));
+    thread listenThread1(listenMessages, clientSocket, ref(logFileAck), ref(logFileBond), ref(logFileAckMutex));
 
-    // Simulate listening for acknowledgements asynchronously
-    thread bondThread1(listenBond, clientSocket, 1, ref(logFileBond));
 
 
     // Join threads
     requestThread1.join();
-    ackThread1.join();
+    listenThread1.join();
 
     // Cleanup and close socket
     closesocket(clientSocket);
     WSACleanup();
     logFileReq.close();
     logFileAck.close();
+    logFileBond.close();
     return 0;
 }

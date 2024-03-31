@@ -20,13 +20,13 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="H_client_log_bond.txt">
+    <Text Include="H_client_log_ack.txt">
       <Filter>Source Files</Filter>
     </Text>
     <Text Include="H_client_log_req.txt">
       <Filter>Source Files</Filter>
     </Text>
-    <Text Include="H_client_log_ack.txt">
+    <Text Include="H_client_log_bond.txt">
       <Filter>Source Files</Filter>
     </Text>
   </ItemGroup>

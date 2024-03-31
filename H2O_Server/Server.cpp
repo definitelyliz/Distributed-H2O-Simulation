@@ -13,7 +13,7 @@ using namespace std;
 
 mutex logMutex;
 
-void clientHandler(SOCKET clientSocket, ofstream& logFileHReqH) {
+void clientHandler(SOCKET clientSocket, ofstream& logFileReqH, ofstream& logFileReqO) {
     char buffer[200];
     int byteCount;
 
@@ -22,16 +22,26 @@ void clientHandler(SOCKET clientSocket, ofstream& logFileHReqH) {
         byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (byteCount > 0) {
             buffer[byteCount] = '\0'; // Null-terminate the received data
-            //cout << buffer << endl;
-            // Extract IDs from the received message
+
+            // Detect client type ('H' or 'O')
+            string clientType;
             string message(buffer);
+            ofstream* logFile;
+            if (message.find("H") != string::npos) {
+                clientType = "H"; // Set client type to 'H' if "H" is detected
+                logFile = &logFileReqH;
+            }
+            else {
+                clientType = "O"; // Otherwise, set client type to 'O'
+                logFile = &logFileReqO;
+            }
             stringstream ss(message);
             string token;
             vector<int> ids;
 
             // Extract all IDs from the message
             while (getline(ss, token, ' ')) {
-                if (token.find("H") != string::npos) {
+                if (token.find(clientType) != string::npos) {
                     int id = stoi(token.substr(1)); // Extract the ID after "H"
                     ids.push_back(id);
                 }
@@ -46,16 +56,16 @@ void clientHandler(SOCKET clientSocket, ofstream& logFileHReqH) {
                 char timestamp[20];
                 strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
                 for (int id : ids) {
-                    logFileHReqH << "H" << id << ", received, " << timestamp << endl;
+                    *logFile << clientType << id << ", received, " << timestamp << endl;
                 }
             }
 
             // Send acknowledgment back to client with received IDs
             string ack = "ack:";
             for (int id : ids) {
-                ack += " H" + to_string(id); // Append each ID to the acknowledgment
+                ack += " " + clientType + to_string(id); // Append each ID to the acknowledgment
             }
-            //cout << "[" << ack << "]" << endl;
+            cout << "[" << ack << "]" << endl;
             send(clientSocket, ack.c_str(), ack.length(), 0);
         }
     }
@@ -113,8 +123,15 @@ int main() {
     }
 
     // Open log file for recording requests
-    ofstream logFileHReqH("H_client_log_req.txt", ios::trunc);
-    if (!logFileHReqH.is_open()) {
+    ofstream logFileReqH("H_client_log_req.txt", ios::trunc);
+    if (!logFileReqH.is_open()) {
+        cerr << "Failed to open log file." << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return 0;
+    }
+    ofstream logFileReqO("O_client_log_req.txt", ios::trunc);
+    if (!logFileReqO.is_open()) {
         cerr << "Failed to open log file." << endl;
         closesocket(serverSocket);
         WSACleanup();
@@ -137,7 +154,7 @@ int main() {
         }
 
         // Start a new thread to handle the client
-        threads.emplace_back(clientHandler, clientSocket, ref(logFileHReqH));
+        threads.emplace_back(clientHandler, clientSocket, ref(logFileReqH), ref(logFileReqO));
     }
 
     // Join all threads
@@ -148,6 +165,7 @@ int main() {
     // Cleanup and close sockets
     closesocket(serverSocket);
     WSACleanup();
-    logFileHReqH.close();
+    logFileReqH.close();
+    logFileReqO.close();
     return 0;
 }
