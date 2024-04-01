@@ -110,10 +110,10 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
 
         // Set up the timeout
         timeval timeout;
-        timeout.tv_sec = 20; 
+        timeout.tv_sec = 7; 
         timeout.tv_usec = 0;
 
-        // Wait for incoming messages with a timeout of 20 seconds
+        // Wait for incoming messages with a timeout of 7 seconds
         int result = select(0, &readSet, nullptr, nullptr, &timeout);
         if (result == SOCKET_ERROR) {
             cerr << "Error in select: " << WSAGetLastError() << endl;
