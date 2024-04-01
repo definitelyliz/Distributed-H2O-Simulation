@@ -131,7 +131,9 @@
     <ClCompile Include="Server.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <Text Include="H_client_log_bond.txt" />
     <Text Include="H_client_log_req.txt" />
+    <Text Include="O_client_log_bond.txt" />
     <Text Include="O_client_log_req.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

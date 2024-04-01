@@ -1,3 +1,4 @@
+//Author: Elijah Dayon
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -7,15 +8,82 @@
 #include <vector>
 #include <thread>
 #include <mutex>
-#include <sstream> // for std::stringstream
+#include <sstream>
 
 using namespace std;
-
 mutex logMutex;
 
-void clientHandler(SOCKET clientSocket, ofstream& logFileReqH, ofstream& logFileReqO) {
+void sendBondedIDs(SOCKET clientSocket, vector<int>* bondedIDs, const string& clientType, ofstream* logFileBond) {
+    // Check if bondedIDs is empty
+    if (bondedIDs->empty()) {
+        return;
+    }
+
+    const int maxChunkSize = 190; // Maximum size of each chunk
+    int idLength = 0;
+    if (!bondedIDs->empty()) {
+        idLength = clientType.length() + to_string((*bondedIDs)[0]).length() + 1; // Calculate ID length
+    }
+
+    // Get current timestamp
+    time_t now = time(0);
+    tm ltm;
+    localtime_s(&ltm, &now);
+    char timestamp[20];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
+
+    // Log bonded IDs if they exist
+    for (int id : *bondedIDs) {
+        *logFileBond << clientType << id << ", bonded, " << timestamp << endl;
+    }
+
+    // Prepare and send bonded IDs in chunks
+    string bondedIDsStr = "bond:";
+    size_t totalSize = 0; // Total size of the current chunk
+    for (int id : *bondedIDs) {
+        // Calculate the size of the current ID string
+        size_t idSize = clientType.length() + to_string(id).length() + 1; // Adding 1 for the space
+
+        // Check if adding the next ID will exceed the maximum chunk size
+        if (totalSize + idSize > maxChunkSize) {
+            // Send the current content of bondedIDsStr
+            cout << "(in) Sent bond: [" << bondedIDsStr.c_str() << "] Size: " << bondedIDsStr.length() << endl;
+            send(clientSocket, bondedIDsStr.c_str(), bondedIDsStr.length(), 0);
+            bondedIDsStr = "bond:"; // Reset bondedIDsStr for the next chunk
+            totalSize = 0; // Reset the total size for the next chunk
+        }
+        bondedIDsStr += " " + clientType + to_string(id);
+        totalSize += idSize; // Update the total size
+    }
+    // Send the remaining content of bondedIDsStr
+    if (!bondedIDsStr.empty()) {
+        cout << "(out) Server sent bond: [" << bondedIDsStr.c_str() << "] Size: " << bondedIDsStr.length() << endl;
+        send(clientSocket, bondedIDsStr.c_str(), bondedIDsStr.length(), 0);
+    }
+
+    // Clear the bondedIDs after sending
+    bondedIDs->clear();
+}
+
+
+
+void clientHandler(SOCKET clientSocket,
+    ofstream& logFileReqH,
+    ofstream& logFileReqO,
+    ofstream& logFileBondH,
+    ofstream& logFileBondO,
+    vector<int>& HIDs,
+    vector<int>& OIDs,
+    vector<int>& bondedHIDs,
+    vector<int>& bondedOIDs,
+    mutex& HIDMutex,
+    mutex& OIDMutex,
+    mutex& logMutex) {
     char buffer[200];
     int byteCount;
+    string clientType;
+    vector<int>* bondedIDs = nullptr;
+    ofstream* logFileBond = nullptr;
 
     while (true) {
         // Receive data from client
@@ -24,17 +92,28 @@ void clientHandler(SOCKET clientSocket, ofstream& logFileReqH, ofstream& logFile
             buffer[byteCount] = '\0'; // Null-terminate the received data
 
             // Detect client type ('H' or 'O')
-            string clientType;
             string message(buffer);
             ofstream* logFile;
+            vector<int>* IDs;
+            mutex* idMutex;
+
             if (message.find("H") != string::npos) {
                 clientType = "H"; // Set client type to 'H' if "H" is detected
                 logFile = &logFileReqH;
+                logFileBond = &logFileBondH;
+                IDs = &HIDs;
+                bondedIDs = &bondedHIDs;
+                idMutex = &HIDMutex;
             }
             else {
                 clientType = "O"; // Otherwise, set client type to 'O'
                 logFile = &logFileReqO;
+                logFileBond = &logFileBondO;
+                IDs = &OIDs;
+                bondedIDs = &bondedOIDs;
+                idMutex = &OIDMutex;
             }
+
             stringstream ss(message);
             string token;
             vector<int> ids;
@@ -42,7 +121,7 @@ void clientHandler(SOCKET clientSocket, ofstream& logFileReqH, ofstream& logFile
             // Extract all IDs from the message
             while (getline(ss, token, ' ')) {
                 if (token.find(clientType) != string::npos) {
-                    int id = stoi(token.substr(1)); // Extract the ID after "H"
+                    int id = stoi(token.substr(1)); // Extract the ID after "H" or "O"
                     ids.push_back(id);
                 }
             }
@@ -60,20 +139,66 @@ void clientHandler(SOCKET clientSocket, ofstream& logFileReqH, ofstream& logFile
                 }
             }
 
+            // Lock the mutex for the corresponding IDs
+            lock_guard<mutex> idLock(*idMutex);
+            for (int id : ids) {
+                IDs->push_back(id); // Add IDs to the list
+            }
+            if (clientType == "H") {
+
+                while (OIDs.size() == 0) {
+                    cout << "Waiting for O_client to get another batch of data" << endl;
+                    this_thread::sleep_for(chrono::milliseconds(2000)); // Sleep for a short interval
+                }
+                cout << "Sending ack to H_client" << endl;
+            }
+            else {
+                while (HIDs.size() == 0) {
+                    cout << "Waiting for H_client" << endl;
+                    this_thread::sleep_for(chrono::milliseconds(2000)); // Sleep for a short interval
+                }
+                cout << "Sending ack to O_client to get another batch of data" << endl;
+            }
             // Send acknowledgment back to client with received IDs
+
             string ack = "ack:";
             for (int id : ids) {
                 ack += " " + clientType + to_string(id); // Append each ID to the acknowledgment
             }
-            cout << "[" << ack << "]" << endl;
+            cout << "Sent acknowledgement: [" << ack.c_str() << "]" << endl;
             send(clientSocket, ack.c_str(), ack.length(), 0);
+            this_thread::sleep_for(chrono::milliseconds(2000)); // Sleep for a short interval
+
+
+            // Try to bond if both HID and OID lists are not empty
+            while (HIDs.size() >= 2 && OIDs.size() >= 1) {
+                // Lock the mutex before accessing shared resources
+                {
+                    bondedHIDs.push_back(HIDs[0]);
+                    bondedHIDs.push_back(HIDs[1]);
+                    bondedOIDs.push_back(OIDs[0]);
+                    HIDs.erase(HIDs.begin(), HIDs.begin() + 2);
+                    OIDs.erase(OIDs.begin());
+                }
+            }
+
+            // Check if there are bonded IDs to send
+            if (!bondedIDs->empty()) {
+                sendBondedIDs(clientSocket, bondedIDs, clientType, logFileBond);
+            }
+
+        }
+        else if (bondedIDs != nullptr) {
+            sendBondedIDs(clientSocket, bondedIDs, clientType, logFileBond);
         }
     }
 }
 
+
 int main() {
     cout << "Water Server" << endl;
     cout << "=========================" << endl;
+
     // Initialize WSA variables
     WSADATA wsaData;
     int wsaerr;
@@ -137,6 +262,28 @@ int main() {
         WSACleanup();
         return 0;
     }
+    ofstream logFileBondH("H_client_log_bond.txt", ios::trunc);
+    if (!logFileBondH.is_open()) {
+        cerr << "Failed to open log file." << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return 0;
+    }
+    ofstream logFileBondO("O_client_log_bond.txt", ios::trunc);
+    if (!logFileBondO.is_open()) {
+        cerr << "Failed to open log file." << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return 0;
+    }
+
+    vector<int> HIDs;
+    vector<int> OIDs;
+    vector<int> bondedHIDs;
+    vector<int> bondedOIDs;
+    mutex HIDMutex;
+    mutex OIDMutex;
+    mutex logMutex;
 
     vector<thread> threads;
 
@@ -154,7 +301,19 @@ int main() {
         }
 
         // Start a new thread to handle the client
-        threads.emplace_back(clientHandler, clientSocket, ref(logFileReqH), ref(logFileReqO));
+        threads.emplace_back(clientHandler, 
+            clientSocket, 
+            ref(logFileReqH), 
+            ref(logFileReqO), 
+            ref(logFileBondH),
+            ref(logFileBondO),
+            ref(HIDs), 
+            ref(OIDs), 
+            ref(bondedHIDs), 
+            ref(bondedOIDs), 
+            ref(HIDMutex), 
+            ref(OIDMutex), 
+            ref(logMutex));
     }
 
     // Join all threads
@@ -167,5 +326,7 @@ int main() {
     WSACleanup();
     logFileReqH.close();
     logFileReqO.close();
+    logFileBondH.close();
+    logFileBondO.close();
     return 0;
 }

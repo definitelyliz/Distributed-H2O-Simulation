@@ -1,3 +1,4 @@
+//AUthor: Elijah Dayon
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -15,7 +16,9 @@ using namespace std;
 std::mutex sendMutex;
 std::condition_variable ackReceived;
 bool isAckReceived = true;
+bool noResponse = false;
 mutex logMutex;
+
 void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile, mutex& logMutex) {
     const int maxChunkSize = 190; // Maximum size of each chunk
     int idLength = 0;
@@ -48,6 +51,10 @@ void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile,
             ackReceived.wait(lock, [] { return isAckReceived; });
             isAckReceived = false; // Reset the flag after acknowledgment is received
         }
+        if (noResponse) {
+            break;
+        }
+
         string request;
         int remainingChars = maxChunkSize; // Remaining characters allowed in the current chunk
 
@@ -68,7 +75,7 @@ void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile,
         if (!request.empty()) {
             request.pop_back();
         }
-        //cout << "Sent: " << "[" << request << "]" << endl;
+        cout << "Sent req: [" << request.c_str() << "] Size: " << request.length() << endl;
         // Send request to server
         send(clientSocket, request.c_str(), request.length(), 0);
 
@@ -91,7 +98,6 @@ void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile,
 }
 
 
-
 void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFileBond, mutex& logMutex) {
     while (true) {
         char buffer[200];
@@ -104,70 +110,84 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
 
         // Set up the timeout
         timeval timeout;
-        timeout.tv_sec = 2;  // 2 seconds
+        timeout.tv_sec = 10; 
         timeout.tv_usec = 0;
 
-        // Wait for incoming messages with a timeout of 5 seconds
+        // Wait for incoming messages with a timeout of 20 seconds
         int result = select(0, &readSet, nullptr, nullptr, &timeout);
         if (result == SOCKET_ERROR) {
             cerr << "Error in select: " << WSAGetLastError() << endl;
             continue;
         }
         else if (result == 0) {
-            cout << "No incoming message within 5 seconds. Stopped listening." << endl;
+            cout << "No incoming message within 10 seconds. Stopped listening." << endl;
+            noResponse = true;
             break;
         }
 
         // Incoming message received, proceed to receive it
         byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
+        if (byteCount <= 0)
+            break;
+        cout << "Size of received message: " << byteCount << ", content: [" << buffer << "]" << endl;
+
         if (byteCount > 0) {
             buffer[byteCount] = '\0';
 
-            // Check if "ack" or "bond" is found in the message
+            // Extract the received message
             string message(buffer);
-            size_t foundAck = message.find("ack");
-            size_t foundBond = message.find("bond");
-
-            // Extract the IDs from the received message
-            string extractedIDs;
+            //cout << "Received message: [" << message << "]" << endl;
             size_t foundColon = message.find(":");
             if (foundColon != string::npos) {
-                extractedIDs = message.substr(foundColon + 2); // Skip ": "
-            }
+                string messageType = message.substr(0, foundColon); // Extract message type
+                string extractedIDs = message.substr(foundColon + 2); // Extract IDs
 
-            //cout << "Received message: [" << extractedIDs << "]" << endl;
+                // Record message in the corresponding log file with timestamp
+                {
+                    lock_guard<mutex> lock(logMutex);
+                    time_t now = time(0);
+                    tm ltm;
+                    localtime_s(&ltm, &now);
+                    char timestamp[20];
+                    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
 
-            // Record message in the corresponding log file with timestamp
-            {
-                lock_guard<mutex> lock(logMutex);
-                time_t now = time(0);
-                tm ltm;
-                localtime_s(&ltm, &now);
-                char timestamp[20];
-                strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &ltm);
-                if (foundAck != string::npos) {
-                    // "ack" found in the message, log each ID to logFileAck individually
-                    stringstream ss(extractedIDs);
-                    string id;
-                    while (getline(ss, id, ' ')) {
-                        logFileAck << id << ", ack, " << timestamp << endl;
+                    // Log the message based on its type
+                    if (messageType == "ack") {
+                        // Log each ID to logFileAck individually
+                        stringstream ss(extractedIDs);
+                        string id;
+                        while (getline(ss, id, ' ')) {
+                            logFileAck << id << ", ack, " << timestamp << endl;
+                        }
+                        {
+                            std::lock_guard<std::mutex> lock(sendMutex);
+                            isAckReceived = true;
+                            ackReceived.notify_all(); // Notify sendRequest to send the next batch
+                        }
+                    }
+                    else if (messageType == "bond") {
+                        // Log IDs to logFileBond
+                        stringstream ss(extractedIDs);
+                        string id;
+                        while (getline(ss, id, ' ')) {
+                            logFileBond << id << ", bonded, " << timestamp << endl;
+                        }
+                    }
+                    else {
+                        cerr << "Invalid message type received: " << messageType << endl;
+                        // Log the entire message for debugging purposes
+                        cerr << "Received invalid message: " << message << endl;
                     }
                 }
-                else if (foundBond != string::npos) {
-                    // "bond" found in the message, log to logFileBond
-                    logFileBond << extractedIDs << ", bonded, " << timestamp << endl;
-                }
             }
-        }
-        {
-            std::lock_guard<std::mutex> lock(sendMutex);
-            isAckReceived = true;
-            ackReceived.notify_all(); // Notify sendRequest to send the next batch
+            else {
+                cerr << "Invalid message format: " << message << endl;
+                // Log the entire message for debugging purposes
+                cerr << "Received invalid message: " << message << endl;
+            }
         }
     }
 }
-
-
 
 int main() {
     cout << "Oxygen Client" << endl;
