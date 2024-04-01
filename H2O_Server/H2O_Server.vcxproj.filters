@@ -14,4 +14,23 @@
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Server.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="H_client_log_req.txt">
+      <Filter>Source Files</Filter>
+    </Text>
+    <Text Include="O_client_log_req.txt">
+      <Filter>Source Files</Filter>
+    </Text>
+    <Text Include="H_client_log_bond.txt">
+      <Filter>Source Files</Filter>
+    </Text>
+    <Text Include="O_client_log_bond.txt">
+      <Filter>Source Files</Filter>
+    </Text>
+  </ItemGroup>
 </Project>
