@@ -12,6 +12,7 @@
 
 using namespace std;
 mutex logMutex;
+mutex bondedIDsMutex;
 
 void sendBondedIDs(SOCKET clientSocket, vector<int>* bondedIDs, const string& clientType, ofstream* logFileBond) {
     // Check if bondedIDs is empty
@@ -20,10 +21,7 @@ void sendBondedIDs(SOCKET clientSocket, vector<int>* bondedIDs, const string& cl
     }
 
     const int maxChunkSize = 190; // Maximum size of each chunk
-    int idLength = 0;
-    if (!bondedIDs->empty()) {
-        idLength = clientType.length() + to_string((*bondedIDs)[0]).length() + 1; // Calculate ID length
-    }
+    int idLength = clientType.length() + to_string((*bondedIDs)[0]).length() + 1; // Calculate ID length
 
     // Get current timestamp
     time_t now = time(0);
@@ -49,6 +47,7 @@ void sendBondedIDs(SOCKET clientSocket, vector<int>* bondedIDs, const string& cl
             // Send the current content of bondedIDsStr
             cout << "(in) Sent bond: [" << bondedIDsStr.c_str() << "] Size: " << bondedIDsStr.length() << endl;
             send(clientSocket, bondedIDsStr.c_str(), bondedIDsStr.length(), 0);
+            this_thread::sleep_for(chrono::milliseconds(200)); // Sleep for a short interval
             bondedIDsStr = "bond:"; // Reset bondedIDsStr for the next chunk
             totalSize = 0; // Reset the total size for the next chunk
         }
@@ -59,11 +58,10 @@ void sendBondedIDs(SOCKET clientSocket, vector<int>* bondedIDs, const string& cl
     if (!bondedIDsStr.empty()) {
         cout << "(out) Server sent bond: [" << bondedIDsStr.c_str() << "] Size: " << bondedIDsStr.length() << endl;
         send(clientSocket, bondedIDsStr.c_str(), bondedIDsStr.length(), 0);
+        this_thread::sleep_for(chrono::milliseconds(200)); // Sleep for a short interval
     }
-
-    // Clear the bondedIDs after sending
-    bondedIDs->clear();
 }
+
 
 
 
@@ -82,6 +80,9 @@ void clientHandler(SOCKET clientSocket,
     char buffer[200];
     int byteCount;
     string clientType;
+    vector<int> emptyBondedIDs; // Empty vector
+    //vector<int>* bondedIDs = &emptyBondedIDs; // Assign the address of the empty vector initially
+
     vector<int>* bondedIDs = nullptr;
     ofstream* logFileBond = nullptr;
 
@@ -147,17 +148,16 @@ void clientHandler(SOCKET clientSocket,
             if (clientType == "H") {
 
                 while (OIDs.size() == 0) {
-                    cout << "Waiting for O_client to get another batch of data" << endl;
-                    this_thread::sleep_for(chrono::milliseconds(2000)); // Sleep for a short interval
+                    cout << "Waiting for O_client"  << endl;
+                    this_thread::sleep_for(chrono::milliseconds(200)); // Sleep for a short interval
                 }
-                cout << "Sending ack to H_client" << endl;
             }
             else {
                 while (HIDs.size() == 0) {
-                    cout << "Waiting for H_client" << endl;
-                    this_thread::sleep_for(chrono::milliseconds(2000)); // Sleep for a short interval
+
+                    cout << "Waiting for H_client" <<  endl;
+                    this_thread::sleep_for(chrono::milliseconds(200)); // Sleep for a short interval
                 }
-                cout << "Sending ack to O_client to get another batch of data" << endl;
             }
             // Send acknowledgment back to client with received IDs
 
@@ -165,12 +165,10 @@ void clientHandler(SOCKET clientSocket,
             for (int id : ids) {
                 ack += " " + clientType + to_string(id); // Append each ID to the acknowledgment
             }
-            cout << "Sent acknowledgement: [" << ack.c_str() << "]" << endl;
+            //cout << "Sent acknowledgement: [" << ack.c_str() << "]" << endl;
             send(clientSocket, ack.c_str(), ack.length(), 0);
-            this_thread::sleep_for(chrono::milliseconds(2000)); // Sleep for a short interval
 
-
-            // Try to bond if both HID and OID lists are not empty
+            lock_guard<mutex> bondedIDsLock(bondedIDsMutex);
             while (HIDs.size() >= 2 && OIDs.size() >= 1) {
                 // Lock the mutex before accessing shared resources
                 {
@@ -188,9 +186,11 @@ void clientHandler(SOCKET clientSocket,
             }
 
         }
-        else if (bondedIDs != nullptr) {
+        else if (!bondedIDs->empty()) {
             sendBondedIDs(clientSocket, bondedIDs, clientType, logFileBond);
         }
+        bondedIDs->clear();
+
     }
 }
 

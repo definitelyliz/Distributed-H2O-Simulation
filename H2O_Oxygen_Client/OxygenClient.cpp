@@ -110,7 +110,7 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
 
         // Set up the timeout
         timeval timeout;
-        timeout.tv_sec = 10; 
+        timeout.tv_sec = 20; 
         timeout.tv_usec = 0;
 
         // Wait for incoming messages with a timeout of 20 seconds
@@ -120,7 +120,7 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
             continue;
         }
         else if (result == 0) {
-            cout << "No incoming message within 10 seconds. Stopped listening." << endl;
+            cout << "No incoming message within 20 seconds. Stopped listening." << endl;
             noResponse = true;
             break;
         }
@@ -129,7 +129,7 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
         byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (byteCount <= 0)
             break;
-        cout << "Size of received message: " << byteCount << ", content: [" << buffer << "]" << endl;
+        //cout << "Size of received message: " << byteCount << ", content: [" << buffer << "]" << endl;
 
         if (byteCount > 0) {
             buffer[byteCount] = '\0';
@@ -190,6 +190,7 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
 }
 
 int main() {
+    int number;
     cout << "Oxygen Client" << endl;
     cout << "=========================" << endl;
     // Initialize WSA variables
@@ -264,8 +265,11 @@ int main() {
     mutex logFileAckMutex;
     mutex logFileBondMutex;
 
+    std::cout << "Please enter M: ";
+    std::cin >> number;
+
     // Simulate sending requests asynchronously
-    thread requestThread1(sendRequest, clientSocket, 1, 100, ref(logFileReq), ref(logFileReqMutex));
+    thread requestThread1(sendRequest, clientSocket, 1, number, ref(logFileReq), ref(logFileReqMutex));
 
     // Simulate listening for acknowledgements asynchronously
     thread listenThread1(listenMessages, clientSocket, ref(logFileAck), ref(logFileBond), ref(logFileAckMutex));
