@@ -1,11 +1,11 @@
-//Author: Elijah Dayon
+//Author: Elijah Dayon and Elizabeth Celestino
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <ctime>
 #include <fstream>
-#include <string> // for std::string
-#include <sstream> // for std::stringstream
+#include <string> 
+#include <sstream> 
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -20,45 +20,45 @@ bool noResponse = false;
 mutex logMutex;
 
 void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile, mutex& logMutex) {
-    const int maxChunkSize = 190; // Maximum size of each chunk
+    const int maxChunkSize = 190; 
     int idLength = 0;
     if (endId <= 9) {
-        idLength = 2; // IDs with 1 digit (0-9)
+        idLength = 2; 
     }
     else if (endId <= 99) {
-        idLength = 3; // IDs with 2 digits (10-99)
+        idLength = 3; 
     }
     else if (endId <= 999) {
-        idLength = 4; // IDs with 3 digits (100-999)
+        idLength = 4; 
     }
     else if (endId <= 9999) {
-        idLength = 5; // IDs with 4 digits (1000-9999)
+        idLength = 5; 
     }
     else if (endId <= 99999) {
-        idLength = 6; // IDs with 5 digits (10000-99999)
+        idLength = 6; 
     }
     else {
-        idLength = 7; // IDs with 6 digits (100000-999999)
+        idLength = 7; 
     }
 
-    int startIdStored = startId; // Initialize startIdStored
-    int endIdStored = startId - 1; // Initialize endIdStored
+    int startIdStored = startId; 
+    int endIdStored = startId - 1; 
 
     // Iterate over IDs and send in chunks
     for (int id = startId; id <= endId; ) {
         {
-            unique_lock<mutex> lock(logMutex); // Use logMutex for synchronization
+            // logMutex for synchronization
+            unique_lock<mutex> lock(logMutex);
             ackReceived.wait(lock, [] { return isAckReceived; });
-            isAckReceived = false; // Reset the flag after acknowledgment is received
+            isAckReceived = false; 
         }
         if (noResponse) {
             break;
         }
 
         string request;
-        int remainingChars = maxChunkSize; // Remaining characters allowed in the current chunk
+        int remainingChars = maxChunkSize; 
 
-        // Build the request string with IDs until the chunk size limit is reached
         while (id <= endId && remainingChars > idLength) {
             string idStr = "H" + to_string(id) + " ";
             if (idStr.length() <= remainingChars) {
@@ -67,15 +67,15 @@ void sendRequest(SOCKET clientSocket, int startId, int endId, ofstream& logFile,
                 ++id;
             }
             else {
-                break; // Stop if adding the ID would exceed the chunk size limit
+                break; 
             }
         }
 
-        // Remove the trailing space from the request
         if (!request.empty()) {
             request.pop_back();
         }
         cout << "Sent req: [" << request.c_str() << "] Size: " << request.length() << endl;
+
         // Send request to server
         send(clientSocket, request.c_str(), request.length(), 0);
 
@@ -103,17 +103,16 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
         char buffer[200];
         int byteCount;
 
-        // Set up the file descriptor set for the socket
+        // file descriptor set for the socket
         fd_set readSet;
         FD_ZERO(&readSet);
         FD_SET(clientSocket, &readSet);
 
-        // Set up the timeout
         timeval timeout;
         timeout.tv_sec = 7;
         timeout.tv_usec = 0;
 
-        // Wait for incoming messages with a timeout of 7 seconds
+        // Wait for incoming messages
         int result = select(0, &readSet, nullptr, nullptr, &timeout);
         if (result == SOCKET_ERROR) {
             cerr << "Error in select: " << WSAGetLastError() << endl;
@@ -129,20 +128,15 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
         byteCount = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (byteCount <= 0)
             break;
-        //cout << "Size of received message: " << byteCount << ", content: [" << buffer << "]" << endl;
 
         if (byteCount > 0) {
             buffer[byteCount] = '\0';
-
-            // Extract the received message
             string message(buffer);
-            //cout << "Received message: [" << message << "]" << endl;
             size_t foundColon = message.find(":");
             if (foundColon != string::npos) {
-                string messageType = message.substr(0, foundColon); // Extract message type
-                string extractedIDs = message.substr(foundColon + 2); // Extract IDs
+                string messageType = message.substr(0, foundColon); 
+                string extractedIDs = message.substr(foundColon + 2);
 
-                // Record message in the corresponding log file with timestamp
                 {
                     lock_guard<mutex> lock(logMutex);
                     time_t now = time(0);
@@ -153,7 +147,6 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
 
                     // Log the message based on its type
                     if (messageType == "ack") {
-                        // Log each ID to logFileAck individually
                         stringstream ss(extractedIDs);
                         string id;
                         while (getline(ss, id, ' ')) {
@@ -162,11 +155,10 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
                         {
                             std::lock_guard<std::mutex> lock(sendMutex);
                             isAckReceived = true;
-                            ackReceived.notify_all(); // Notify sendRequest to send the next batch
+                            ackReceived.notify_all(); 
                         }
                     }
                     else if (messageType == "bond") {
-                        // Log IDs to logFileBond
                         stringstream ss(extractedIDs);
                         string id;
                         while (getline(ss, id, ' ')) {
@@ -175,14 +167,12 @@ void listenMessages(SOCKET clientSocket, ofstream& logFileAck, ofstream& logFile
                     }
                     else {
                         cerr << "Invalid message type received: " << messageType << endl;
-                        // Log the entire message for debugging purposes
                         cerr << "Received invalid message: " << message << endl;
                     }
                 }
             }
             else {
                 cerr << "Invalid message format: " << message << endl;
-                // Log the entire message for debugging purposes
                 cerr << "Received invalid message: " << message << endl;
             }
         }
@@ -242,7 +232,6 @@ int main() {
         return 0;
     }
 
-    // Open log file for recording acknowledgements, truncating existing content
     ofstream logFileAck("H_client_log_ack.txt", ios::trunc);
     if (!logFileAck.is_open()) {
         cerr << "Failed to open log file." << endl;
@@ -251,7 +240,6 @@ int main() {
         return 0;
     }
 
-    // Open log file for recording bond messages, truncating existing content
     ofstream logFileBond("H_client_log_bond.txt", ios::trunc);
     if (!logFileBond.is_open()) {
         cerr << "Failed to open log file." << endl;
@@ -260,7 +248,6 @@ int main() {
         return 0;
     }
 
-    // Define mutexes for each log file
     mutex logFileReqMutex;
     mutex logFileAckMutex;
     mutex logFileBondMutex;
@@ -268,10 +255,10 @@ int main() {
     std::cout << "Please enter M: ";
     std::cin >> number;
 
-
+    // sending requests asynchronously
     thread requestThread1(sendRequest, clientSocket, 1, number, ref(logFileReq), ref(logFileReqMutex));
 
-    // Simulate listening for acknowledgements asynchronously
+    // listening for acknowledgements asynchronously
     thread listenThread1(listenMessages, clientSocket, ref(logFileAck), ref(logFileBond), ref(logFileAckMutex));
 
 
